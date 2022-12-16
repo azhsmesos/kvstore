@@ -1,6 +1,7 @@
-use std::{collections::BTreeMap, sync::Mutex, mem::size_of};
+mod skip;
 
-use nix::{fcntl::{self, OFlag}, sys::stat::{Mode, self}, unistd};
+
+use std::{collections::BTreeMap, sync::Mutex};
 
 /// Operations of Index
 pub(crate) trait IndexOperate<K: Ord, V> {
@@ -43,7 +44,5 @@ impl<K: Ord, V> IndexOperate<K, V> for KVStore<K, V> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_get() {
-
-    }
+    fn test_get() {}
 }
