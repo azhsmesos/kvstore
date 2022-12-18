@@ -1,4 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
+use std::fmt::Display;
 
 type RefNode<K, V> = Rc<RefCell<Node<K, V>>>;
 
@@ -30,12 +31,12 @@ impl<K: Ord + Clone + Copy, V: Clone + Copy> Node<K, V> {
 }
 
 #[derive(Debug, Clone)]
-pub struct SkipList<K: Ord + Clone + Copy, V: Clone + Copy> {
+pub struct SkipList<K: Ord + Clone + Copy + Display, V: Clone + Copy> {
     head: RefCell<Option<RefNode<K, V>>>,
     max_level: usize,
 }
 
-impl<K: Ord + Clone + Copy, V: Clone + Copy> SkipList<K, V> {
+impl<K: Ord + Clone + Copy + Display, V: Clone + Copy> SkipList<K, V> {
     pub fn new(max_level: usize) -> Self {
         SkipList {
             head: RefCell::new(None),
@@ -289,7 +290,7 @@ impl<K: Ord + Clone + Copy, V: Clone + Copy> SkipList<K, V> {
         }
     }
 
-    fn find(&self, key: K) -> Option<V> {
+    pub fn find(&self, key: K) -> Option<V> {
         let h = { self.head.borrow().clone() };
         match h {
             Some(ref head) => {
@@ -357,11 +358,42 @@ impl<K: Ord + Clone + Copy, V: Clone + Copy> SkipList<K, V> {
     //     }
     // }
 
-    pub fn delete(&self, key: usize) {
-        todo!()
+    pub fn delete(&self, key: K) {
+        let h = self.head.borrow().clone();
+        match h {
+            Some(head) => {
+                let mut current = head.clone();
+                loop {
+                    let mut tmp = current.clone();
+                    if tmp.borrow().key == key {
+                        if let Some(d) = &tmp.borrow().next {
+                            current = Rc::clone(d);
+                        }
+                        if let Some(d) = &tmp.borrow().down {
+                            current = Rc::clone(d);
+                        }
+                    } else if tmp.borrow().key < key {
+                        if let Some(next_node) = &tmp.borrow().next {
+                            if next_node.borrow().key <= key {
+                                current = Rc::clone(next_node);
+                            } else {
+                                if let Some(down_node) = &tmp.borrow().down {
+                                    current = Rc::clone(down_node);
+                                }
+                            }
+                        } else {
+                            if let Some(down_node) = &tmp.borrow().down {
+                                current = Rc::clone(down_node);
+                            }
+                        }
+                    }
+                }
+            },
+            None => {},
+        }
     }
 
-    pub fn get_range(&self, key: i32, value: i32) -> Option<Vec<&i32>> {
+    pub fn get_range(&self, key: K, value: V) -> Option<Vec<&i32>> {
         todo!()
     }
 }
@@ -383,5 +415,7 @@ mod tests {
         assert_eq!(Some(3), skiplist.find(3));
         skiplist.insert_or_update(2, 5);
         assert_eq!(Some(5), skiplist.find(2));
+        skiplist.delete(2);
+
     }
 }
