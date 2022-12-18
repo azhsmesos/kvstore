@@ -1,44 +1,44 @@
+
 use std::{
-    ptr,
-    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+    io::Write,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
-type NodePtr<T> = AtomicPtr<Node<T>>;
+use crossbeam::epoch;
+use epoch::{Atomic, Owned, Shared};
 
+type NodePtr<T> = Atomic<Node<T>>;
 struct Node<T> {
     pub item: Option<T>,
     pub next: NodePtr<T>,
 }
 
 impl<T> Node<T> {
-    pub fn new(item: T) -> Self {
-        Self {
-            item: Some(item),
-            next: AtomicPtr::new(ptr::null_mut()),
-        }
-    }
     pub fn new_empty() -> Self {
         Self {
             item: None,
-            next: AtomicPtr::new(ptr::null_mut()),
+            next: Atomic::null(),
+        }
+    }
+
+    pub fn new(data: T) -> Self {
+        Self {
+            item: Some(data),
+            next: Atomic::null(),
         }
     }
 }
 
-/// WARNING:
-/// LinkedQueue does not fix ABA problem and UAF bug in multi-consumer scenarios
-pub struct LinkedQueue<T> {
-    // empty list, which is much more easier to implement
+pub struct Queue<T> {
     len: AtomicUsize,
     head: NodePtr<T>,
     tail: NodePtr<T>,
 }
 
-impl<T> Default for LinkedQueue<T> {
+impl<T> Default for Queue<T> {
     fn default() -> Self {
-        let header = Box::new(Node::new_empty());
-        let head = AtomicPtr::from(Box::into_raw(header));
-        let tail = AtomicPtr::new(head.load(Ordering::SeqCst));
+        let head = Atomic::new(Node::new_empty());
+        let tail = head.clone();
         Self {
             len: AtomicUsize::new(0),
             head,
@@ -47,51 +47,54 @@ impl<T> Default for LinkedQueue<T> {
     }
 }
 
-impl<T> LinkedQueue<T> {
+impl<T> Queue<T> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len
-            .compare_exchange(0, 0, Ordering::Release, Ordering::Relaxed)
-            .is_ok()
+    pub fn size(&self) -> usize {
+        self.len.load(Ordering::SeqCst)
     }
 
-    pub fn push(&self, item: T) {
-        let new_node = Box::new(Node::new(item));
-        let node_ptr: *mut Node<T> = Box::into_raw(new_node);
+    pub fn is_empty(&self) -> bool {
+        0 == self.len.load(Ordering::SeqCst)
+    }
 
-        let old_tail = self.tail.load(Ordering::Acquire);
+    pub fn push(&self, data: T) {
+        let guard = epoch::pin();
+
+        let new_node = Owned::new(Node::new(data)).into_shared(&guard);
+
+        let mut tail;
         unsafe {
-            let mut tail_next = &(*old_tail).next;
-            while tail_next
-                .compare_exchange(
-                    ptr::null_mut(),
-                    node_ptr,
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                )
-                .is_err()
-            {
-                let mut tail = tail_next.load(Ordering::Acquire);
-
-                // step to tail
-                loop {
-                    let nxt = (*tail).next.load(Ordering::Acquire);
-                    if nxt.is_null() {
-                        break;
-                    }
-                    tail = nxt;
+            let null = Shared::null();
+            loop {
+                tail = self.tail.load(Ordering::Acquire, &guard);
+                let tail_next = &(*tail.as_raw()).next;
+                if tail_next
+                    .compare_exchange(null, new_node, Ordering::AcqRel, Ordering::Relaxed, &guard)
+                    .is_ok()
+                {
+                    break;
                 }
-
-                tail_next = &(*tail).next;
+                let tail_next = tail_next.load(Ordering::Acquire, &guard);
+                let _ = self.tail.compare_exchange(
+                    tail,
+                    tail_next,
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                    &guard,
+                );
             }
         }
-        let _ =
-            self.tail
-                .compare_exchange(old_tail, node_ptr, Ordering::Release, Ordering::Relaxed);
-        // finish insert, increase length;
+        let _ = self.tail.compare_exchange(
+            tail,
+            new_node,
+            Ordering::Release,
+            Ordering::Relaxed,
+            &guard,
+        );
+
         self.len.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -100,11 +103,11 @@ impl<T> LinkedQueue<T> {
         if self.is_empty() {
             return data;
         }
+        let guard = &epoch::pin();
         unsafe {
-            let mut head;
             loop {
-                head = self.head.load(Ordering::Acquire);
-                let next = (*head).next.load(Ordering::Acquire);
+                let head = self.head.load(Ordering::Acquire, guard);
+                let mut next = (*head.as_raw()).next.load(Ordering::Acquire, guard);
 
                 if next.is_null() {
                     return None;
@@ -112,32 +115,51 @@ impl<T> LinkedQueue<T> {
 
                 if self
                     .head
-                    .compare_exchange(head, next, Ordering::Release, Ordering::Relaxed)
+                    .compare_exchange(head, next, Ordering::Release, Ordering::Relaxed, guard)
                     .is_ok()
                 {
-                    data = (*next).item.take();
+                    data = next.deref_mut().item.take();
+                    guard.defer_destroy(head);
                     break;
                 }
             }
-            // drop `head`
-            let _ = Box::from_raw(head);
-        };
+        }
         self.len.fetch_sub(1, Ordering::SeqCst);
-
         data
     }
 }
 
-impl<T> Drop for LinkedQueue<T> {
+impl<T> Drop for Queue<T> {
     fn drop(&mut self) {
         while self.pop().is_some() {}
-        let h = self.head.load(Ordering::SeqCst);
+        let guard = &epoch::pin();
         unsafe {
-            // drop `h`
-            Box::from_raw(h);
+            let h = self.head.load_consume(guard);
+            guard.defer_destroy(h);
         }
     }
 }
+
+impl<T> Queue<T> {
+    // 用来打印元素
+    pub fn walk(&self) {
+        let _ = std::io::stdout().flush();
+        let guard = epoch::pin();
+        let mut start = self.head.load(Ordering::Acquire, &guard);
+
+        let mut actual_len = 0;
+        while !start.is_null() {
+            unsafe {
+                print!("-> {:?}", start.as_raw());
+                let _ = std::io::stdout().flush();
+                start = (*start.as_raw()).next.load(Ordering::Acquire, &guard);
+            }
+            actual_len += 1;
+        }
+        println!(" size:{} actual: {}", self.size(), actual_len - 1);
+    }
+}
+
 
 #[cfg(test)]
 mod lockfree_queue_test {
@@ -149,14 +171,14 @@ mod lockfree_queue_test {
         thread,
     };
     use crate::entry::Entry;
-    use crate::lockfree_queue::LinkedQueue;
+    use crate::lockfree_queue::{ Queue};
 
 
     #[test]
     fn test_single() {
-        let q = LinkedQueue::new();
+        let q = Queue::new();
         let entry = Entry::new(1, 2);
         q.push(entry);
-        println!("{}", q.pop().unwrap().key);
+        q.walk();
     }
 }
