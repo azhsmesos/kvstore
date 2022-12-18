@@ -163,6 +163,132 @@ impl<K: Ord + Clone + Copy, V: Clone + Copy> SkipList<K, V> {
         }
     }
 
+    pub fn insert_or_update(&self, key: K, value: V) {
+        let level = 1 + if !self.head.borrow().is_none() {
+            self.random_level()
+        } else {
+            self.max_level
+        }; 
+
+        let node = Node::new(key, value);
+        let mut current_level = self.max_level + 1;
+
+        let h = { self.head.borrow().clone() };
+        match h {
+            Some(head) => {
+                let mut current = head.clone();
+                let mut up_node: Option<RefNode<K, V>> = None;
+                loop {
+                    let mut tmp = current.clone();
+                    let tmp_key = {tmp.borrow().key};
+                    if tmp_key == key {
+                        loop {
+                            let new_tmp = tmp.clone();
+                            {
+                                tmp.borrow_mut().value = value;
+                            }
+                            if let Some(d) = &new_tmp.borrow().down {
+                                tmp = Rc::clone(d);
+                            } else {
+                                return;
+                            };
+                        }
+                    }
+                    if current_level > level {
+                        if tmp.borrow().key < key {
+                            if let Some(next_node) = &tmp.borrow().next {
+                                if next_node.borrow().key <= key {
+                                    current = Rc::clone(next_node);
+                                    continue;
+                                } else {
+                                    if let Some(down_node) = &tmp.borrow().down {
+                                        current = Rc::clone(down_node);
+                                        current_level -= 1;
+                                    } else {
+                                        return;
+                                    }
+                                }
+                            } else {
+                                if let Some(down_node) = &tmp.borrow().down {
+                                    current = Rc::clone(down_node);
+                                    current_level -= 1;
+                                } else {
+                                    return;
+                                }
+                            }
+                        }
+                    } else {
+                        let current_key = { tmp.borrow().key };
+                        if current_key < key {
+                            let next_node = { &tmp.borrow().next.clone() };
+                            if let Some(next_node) = next_node {
+                                if next_node.borrow().key <= key {
+                                    current = Rc::clone(next_node);
+                                    continue;
+                                } else {
+                                    let new_node = Node::new_with_node(node.clone());
+                                    new_node.borrow_mut().next = Some(Rc::clone(next_node));
+                                    current.borrow_mut().next = Some(new_node.clone());
+                                    match up_node {
+                                        Some(ref up) => {
+                                            up.borrow_mut().down = Some(new_node.clone());
+                                        }
+                                        None => {
+                                            up_node = Some(new_node.clone());
+                                        }
+                                    }
+                                    if let Some(down_node) = &tmp.borrow().down {
+                                        current = Rc::clone(down_node);
+                                        current_level -= 1;
+                                        continue;
+                                    }
+                                    return;
+                                }
+                            }
+                            let new_node = Node::new_with_node(node.clone());
+                            current.borrow_mut().next = Some(new_node.clone());
+                            match up_node {
+                                Some(ref up) => {
+                                    up.borrow_mut().down = Some(new_node.clone());
+                                }
+                                None => {
+                                    up_node = Some(new_node.clone());
+                                }
+                            }
+                            if let Some(down_node) = &tmp.borrow().down {
+                                current = Rc::clone(down_node);
+                                current_level -= 1;
+                            } else {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            None => {
+                let mut current = None;
+                for i in 0..level {
+                    if i == 0 {
+                        let n = Node::new_with_node(node.clone());
+                        *self.head.borrow_mut() = Some(n.clone());
+                        current = Some(n.clone());
+                        continue;
+                    }
+                    let new_node = Some(Node::new_with_node(node.clone()));
+                    match current {
+                        Some(ref c) => {
+                            c.borrow_mut().down = new_node.clone();
+                        }
+                        None => {
+                            return;
+                        }
+                    }
+                    current = new_node.clone();
+                }
+            }
+        }
+    }
+
     fn find(&self, key: K) -> Option<V> {
         let h = { self.head.borrow().clone() };
         match h {
@@ -199,12 +325,13 @@ impl<K: Ord + Clone + Copy, V: Clone + Copy> SkipList<K, V> {
     }
 
     // fn print_level_path(&self) {
-    //     match self.head {
-    //         Some(ref head) => {
+    //     let h = { self.head.borrow().clone() };
+    //     match h {
+    //         Some(head) => {
     //             let mut current = head.clone();
     //             loop {
     //                 let tmp = current.clone();
-    //                 println!("key = {}, value = {}", tmp.borrow().key, tmp.borrow().value);
+    //                 // println!("key = {:?}, value = {}", tmp.borrow().key, tmp.borrow().value);
     //                 if let Some(value) = &tmp.borrow().down {
     //                     current = Rc::clone(value);
     //                 } else {
@@ -212,11 +339,11 @@ impl<K: Ord + Clone + Copy, V: Clone + Copy> SkipList<K, V> {
     //                     loop {
     //                         let n_tmp = n.clone();
     //                         if let Some(value) = &n_tmp.borrow().next {
-    //                             println!(
-    //                                 "key = {}, value = {}",
-    //                                 value.borrow().key,
-    //                                 value.borrow().value
-    //                             );
+    //                             // println!(
+    //                             //     "key = {}, value = {}",
+    //                             //     value.borrow().key,
+    //                             //     value.borrow().value
+    //                             // );
     //                             n = Rc::clone(value);
     //                         } else {
     //                             return;
@@ -254,5 +381,7 @@ mod tests {
         // skiplist.print_level_path();
         assert_eq!(Some(2), skiplist.find(2));
         assert_eq!(Some(3), skiplist.find(3));
+        skiplist.insert_or_update(2, 5);
+        assert_eq!(Some(5), skiplist.find(2));
     }
 }
