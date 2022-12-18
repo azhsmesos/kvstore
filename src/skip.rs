@@ -1,17 +1,17 @@
 use std::{cell::RefCell, rc::Rc};
 
-type RefNode = Rc<RefCell<Node>>;
+type RefNode<K, V> = Rc<RefCell<Node<K, V>>>;
 
 #[derive(Debug, Clone)]
-pub struct Node {
-    key: usize,
-    value: i32,
-    down: Option<RefNode>,
-    next: Option<RefNode>,
+pub struct Node<K: Ord + Clone + Copy, V: Clone + Copy> {
+    key: K,
+    value: V,
+    down: Option<RefNode<K, V>>,
+    next: Option<RefNode<K, V>>,
 }
 
-impl Node {
-    pub fn new(key: usize, value: i32) -> Self {
+impl<K: Ord + Clone + Copy, V: Clone + Copy> Node<K, V> {
+    pub fn new(key: K, value: V) -> Self {
         Self {
             key,
             value,
@@ -20,22 +20,22 @@ impl Node {
         }
     }
 
-    pub fn new_ref_node(key: usize, value: i32) -> RefNode {
+    pub fn new_ref_node(key: K, value: V) -> RefNode<K, V> {
         Rc::new(RefCell::new(Node::new(key, value)))
     }
 
-    pub fn new_with_node(node: Node) -> RefNode {
+    pub fn new_with_node(node: Node<K, V>) -> RefNode<K, V> {
         Rc::new(RefCell::new(node))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct SkipList {
-    head: RefCell<Option<RefNode>>,
+pub struct SkipList<K: Ord + Clone + Copy, V: Clone + Copy> {
+    head: RefCell<Option<RefNode<K, V>>>,
     max_level: usize,
 }
 
-impl SkipList {
+impl<K: Ord + Clone + Copy, V: Clone + Copy> SkipList<K, V> {
     pub fn new(max_level: usize) -> Self {
         SkipList {
             head: RefCell::new(None),
@@ -51,7 +51,7 @@ impl SkipList {
         n
     }
 
-    pub fn insert(&self, key: usize, value: i32) {
+    pub fn insert(&self, key: K, value: V) {
         let level = 1 + if !self.head.borrow().is_none() {
             self.random_level()
         } else {
@@ -66,7 +66,7 @@ impl SkipList {
         match h {
             Some(head) => {
                 let mut current = head.clone();
-                let mut up_node: Option<Rc<RefCell<Node>>> = None;
+                let mut up_node: Option<RefNode<K, V>> = None;
                 loop {
                     let tmp = current.clone();
                     if current_level > level {
@@ -163,7 +163,7 @@ impl SkipList {
         }
     }
 
-    fn find(&self, key: usize) -> Option<i32> {
+    fn find(&self, key: K) -> Option<V> {
         let h = { self.head.borrow().clone() };
         match h {
             Some(ref head) => {
