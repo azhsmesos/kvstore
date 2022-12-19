@@ -1,4 +1,3 @@
-
 use std::{
     io::Write,
     sync::atomic::{AtomicUsize, Ordering},
@@ -160,9 +159,10 @@ impl<T> Queue<T> {
     }
 }
 
-
 #[cfg(test)]
 mod lockfree_queue_test {
+    use crate::entry::Entry;
+    use crate::lockfree_queue::Queue;
     use std::{
         sync::{
             atomic::{AtomicI32, Ordering},
@@ -170,9 +170,6 @@ mod lockfree_queue_test {
         },
         thread,
     };
-    use crate::entry::Entry;
-    use crate::lockfree_queue::{ Queue};
-
 
     #[test]
     fn test_single() {

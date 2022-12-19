@@ -1,7 +1,6 @@
-mod skip;
-mod lockfree_queue;
 mod entry;
-
+mod lockfree_queue;
+mod skip;
 
 use std::{collections::BTreeMap, sync::Mutex};
 
