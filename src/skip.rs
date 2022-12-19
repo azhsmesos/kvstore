@@ -460,16 +460,23 @@ mod tests {
     #[test]
     fn test() {
         let skiplist = SkipList::new(2);
-        skiplist.insert(1, 1);
-        skiplist.insert(3, 3);
-        skiplist.insert(2, 2);
-        skiplist.insert(4, 4);
+        skiplist.insert_or_update(1, 1);
+        skiplist.insert_or_update(3, 3);
+        skiplist.insert_or_update(2, 2);
+        skiplist.insert_or_update(4, 4);
         // skiplist.print_level_path();
         assert_eq!(Some(2), skiplist.find(2));
         assert_eq!(Some(3), skiplist.find(3));
         skiplist.insert_or_update(2, 5);
         assert_eq!(Some(5), skiplist.find(2));
-        assert_eq!(vec![1, 5, 3, 4], skiplist.get_range(&1, &4));
-        // skiplist.delete(2);
+        skiplist.insert_or_update(5, 5);
+        assert_eq!(Some(5), skiplist.find(5));
+        skiplist.insert_or_update(8, 8);
+        assert_eq!(Some(8), skiplist.find(8));
+        skiplist.insert_or_update(7, 7);
+        assert_eq!(Some(7), skiplist.find(7));
+        skiplist.insert_or_update(6, 6);
+        assert_eq!(Some(6), skiplist.find(6));
+        assert_eq!(vec![1, 5, 3, 4, 5, 6, 7], skiplist.get_range(&1, &7)); 
     }
 }
